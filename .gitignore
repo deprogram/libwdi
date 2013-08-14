@@ -13,11 +13,13 @@
 *.ncb
 *.o
 *.obj
+*.opensdf
 *.opt
 *.pc
 *.pdb
 *.plg
 *.res
+*.sdf
 *.suo
 *.swp
 *.user
