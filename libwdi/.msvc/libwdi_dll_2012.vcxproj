@@ -198,15 +198,15 @@ embedder embedded.h</Command>
     <ResourceCompile Include="..\libwdi.rc" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="embedder_2010.vcxproj">
+    <ProjectReference Include="embedder_2012.vcxproj">
       <Project>{792d44d5-28a7-4eb3-b84b-8021fe3189f9}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
-    <ProjectReference Include="installer_x64_2010.vcxproj">
+    <ProjectReference Include="installer_x64_2012.vcxproj">
       <Project>{e5a56ee0-182f-470f-8cdc-8c1b7b86ee26}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
-    <ProjectReference Include="installer_x86_2010.vcxproj">
+    <ProjectReference Include="installer_x86_2012.vcxproj">
       <Project>{9b1c561e-f95b-4849-a7aa-a4350e227c20}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>

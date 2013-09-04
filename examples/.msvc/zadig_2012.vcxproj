@@ -184,7 +184,7 @@
     <ResourceCompile Include="..\zadig.rc" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\libwdi\.msvc\libwdi_static_2010.vcxproj">
+    <ProjectReference Include="..\..\libwdi\.msvc\libwdi_static_2012.vcxproj">
       <Project>{9aa0e745-1a0a-4700-8ecb-6a6de9dbf8b9}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>

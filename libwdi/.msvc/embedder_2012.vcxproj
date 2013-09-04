@@ -99,7 +99,7 @@
     <ClInclude Include="..\embedder_files.h" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="detect_64build_2010.vcxproj">
+    <ProjectReference Include="detect_64build_2012.vcxproj">
       <Project>{5faef8f7-c809-4a68-862f-f8bc6e775b61}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
