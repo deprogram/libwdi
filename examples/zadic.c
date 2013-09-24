@@ -70,6 +70,7 @@ int __cdecl main(int argc, char *argv[])
 	static int use_supplied_inf_flag = 0;
 	int r, option_index = 0;
 	int drivertype = WDI_LIBUSB0;
+	int devNum = 0;
 
 	cl_options.trim_whitespaces = true;
 
@@ -152,6 +153,7 @@ int __cdecl main(int argc, char *argv[])
 
 	for (device = list; device != NULL; device = device->next) {
 		printf("Found USB device: \"%s\" (%04X:%04X)\n", device->desc, device->vid, device->pid);
+		devNum++;
 		wdi_set_log_level(verbose_flag);
 		// If vid and pid have not been initialized
 		// prompt user to install driver for each device
@@ -171,10 +173,13 @@ int __cdecl main(int argc, char *argv[])
 				continue;
 			}
 		}
+	
+		sprintf(path, "%s\\%d", path, devNum); 
+
 		// Does the user want to use a supplied .inf
 		if (use_supplied_inf_flag == 0) {
 			pd_options.driver_type = drivertype;
-			if (wdi_prepare_driver(device, path,INF_NAME, &pd_options) == WDI_SUCCESS) {
+			if (wdi_prepare_driver(device, path, INF_NAME, &pd_options) == WDI_SUCCESS) {
 				printf("installing wdi driver with <%s> at <%s>\n",INF_NAME, path);
 				wdi_install_driver(device, path, INF_NAME, &id_options);
 			}
