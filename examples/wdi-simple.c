@@ -40,7 +40,7 @@
  * Change these values according to your device if
  * you don't want to provide parameters
  */
-#define DESC        "Microsoft XBox Controller Type S"
+#define DESC        "Android Device"
 #define VID         0x045E
 #define PID         0x0289
 #define INF_NAME    "usb_device.inf"

@@ -87,6 +87,7 @@ int __cdecl main(int argc, char *argv[])
 			{"help", no_argument, 0, 'd'},
 			{"verbose", no_argument, &verbose_flag, 0},
 			{"drivertype", required_argument, 0, 'e'},
+			{"path", required_argument, 0, 'f'},
 			{0, 0, 0, 0}
 		};
 
@@ -127,6 +128,10 @@ int __cdecl main(int argc, char *argv[])
 		case 'e':
 			drivertype = atoi(optarg);
 			printf("OPT: drivertype %d\n", drivertype);
+			break;
+		case 'f':
+			path = optarg;
+			printf("OPT: path %s\n", path);
 			break;
 		default:
 			usage();
