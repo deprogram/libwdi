@@ -71,6 +71,7 @@ int __cdecl main(int argc, char *argv[])
 	int r, option_index = 0;
 	int drivertype = WDI_LIBUSB0;
 	int devNum = 0;
+	bool driverinstalled = false;
 
 	cl_options.trim_whitespaces = true;
 
@@ -176,16 +177,20 @@ int __cdecl main(int argc, char *argv[])
 	
 		sprintf(path, "%s\\%d", path, devNum); 
 
-		// Does the user want to use a supplied .inf
-		if (use_supplied_inf_flag == 0) {
-			pd_options.driver_type = drivertype;
-			if (wdi_prepare_driver(device, path, INF_NAME, &pd_options) == WDI_SUCCESS) {
+		if (!driverinstalled) {
+			// Does the user want to use a supplied .inf
+			if (use_supplied_inf_flag == 0) {
+				pd_options.driver_type = drivertype;
+				if (wdi_prepare_driver(device, path, INF_NAME, &pd_options) == WDI_SUCCESS) {
+					printf("installing wdi driver with <%s> at <%s>\n",INF_NAME, path);
+					wdi_install_driver(device, path, INF_NAME, &id_options);
+					driverinstalled = true;
+				}
+			} else {
 				printf("installing wdi driver with <%s> at <%s>\n",INF_NAME, path);
 				wdi_install_driver(device, path, INF_NAME, &id_options);
+				driverinstalled = true;
 			}
-		} else {
-			printf("installing wdi driver with <%s> at <%s>\n",INF_NAME, path);
-			wdi_install_driver(device, path, INF_NAME, &id_options);
 		}
 	}
 	wdi_destroy_list(list);
