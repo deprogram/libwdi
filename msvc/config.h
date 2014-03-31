@@ -9,6 +9,11 @@
 /* Disable "Banned API Usage:" errors when using WDK's OACR/Prefast */
 #pragma warning(disable:28719)
 #endif
+#if defined(_MSC_VER)
+// Disable some VS2012 Code Analysis warnings
+#pragma warning(disable:6258)		// We'll use TerminateThread() regardless
+#pragma warning(disable:6387)
+#endif
 
 /* 
  * Embed WinUSB driver files from the following DDK location
@@ -16,11 +21,11 @@
  * match your WinUSB redist directrories
  */
 #ifndef DDK_DIR
-#define DDK_DIR "C:/Program Files (x86)/Windows Kits/8.0"
+#define DDK_DIR "C:/Program Files (x86)/Windows Kits/8.1"
 #endif
 
 /* DDK WDF coinstaller version */
-#define WDF_VER 1009
+#define WDF_VER 1011
 
 /* CoInstaller subdirectory for WinUSB redist files ("winusb" or "wdf") */
 #define COINSTALLER_DIR "wdf"

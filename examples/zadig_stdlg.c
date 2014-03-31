@@ -1,7 +1,7 @@
 /*
  * Zadig: Automated Driver Installer for USB devices (GUI version)
  * Standard Dialog Routines (Browse for folder, About, etc)
- * Copyright (c) 2010-2011 Pete Batard <pete@akeo.ie>
+ * Copyright (c) 2010-2014 Pete Batard <pete@akeo.ie>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,6 +17,12 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+/* Memory leaks detection - define _CRTDBG_MAP_ALLOC as preprocessor macro */
+#ifdef _CRTDBG_MAP_ALLOC
+#include <stdlib.h>
+#include <crtdbg.h>
+#endif
+
 #include <windows.h>
 #include <windowsx.h>
 #include <stdlib.h>
@@ -29,13 +35,15 @@
 #include <shellapi.h>
 #include <process.h>
 #include <commdlg.h>
+#include <richedit.h>
 #include <sddl.h>
 
 #include "libwdi.h"
 #include "zadig_resource.h"
 #include "zadig.h"
 #include "zadig_license.h"
-#include "../libwdi/msapi_utf8.h"
+#include "zadig_registry.h"
+#include "msapi_utf8.h"
 
 // The following is only available on Vista and later
 #if (_WIN32_WINNT >= 0x0600)
@@ -57,13 +65,18 @@ static LPITEMIDLIST (WINAPI *pSHSimpleIDListFromPath)(PCWSTR pszPath) = NULL;
  * Globals
  */
 static HICON hMessageIcon = (HICON)INVALID_HANDLE_VALUE;
-static char* message_text = NULL;
-static char* message_title = NULL;
-enum windows_version windows_version = WINDOWS_UNSUPPORTED;
+static char* szMessageText = NULL;
+static char* szMessageTitle = NULL;
+int windows_version = WINDOWS_UNSUPPORTED;
 extern HFONT bold_font;
 extern float fScale;
 static HWND browse_edit;
 static WNDPROC org_browse_wndproc;
+static const SETTEXTEX friggin_microsoft_unicode_amateurs = {ST_DEFAULT, CP_UTF8};
+static BOOL notification_is_question;
+static const notification_info* notification_more_info;
+static BOOL reg_commcheck = FALSE;
+static WNDPROC original_wndproc = NULL;
 
 /*
  * Converts a name + ext UTF-8 pair to a valid MS filename.
@@ -72,11 +85,11 @@ static WNDPROC org_browse_wndproc;
 char* to_valid_filename(char* name, char* ext)
 {
 	size_t i, j, k;
-	bool found;
+	BOOL found;
 	char* ret;
 	wchar_t unauthorized[] = L"\x0001\x0002\x0003\x0004\x0005\x0006\x0007\x0008\x000a"
 		L"\x000b\x000c\x000d\x000e\x000f\x0010\x0011\x0012\x0013\x0014\x0015\x0016\x0017"
-		L"\x0018\x0019\x001a\x001b\x001c\x001d\x001e\x001f\x007f\"*/:<>?\\|";
+		L"\x0018\x0019\x001a\x001b\x001c\x001d\x001e\x001f\x007f\"*/:<>?\\|,";
 	wchar_t to_underscore[] = L" \t";
 	wchar_t *wname, *wext, *wret;
 
@@ -104,18 +117,18 @@ char* to_valid_filename(char* name, char* ext)
 	safe_free(wext);
 
 	for (i=0, k=0; i<wcslen(wret); i++) {
-		found = false;
+		found = FALSE;
 		for (j=0; j<wcslen(unauthorized); j++) {
 			if (wret[i] == unauthorized[j]) {
-				found = true; break;
+				found = TRUE; break;
 			}
 		}
 		if (found) continue;
-		found = false;
+		found = FALSE;
 		for (j=0; j<wcslen(to_underscore); j++) {
 			if (wret[i] == to_underscore[j]) {
 				wret[k++] = '_';
-				found = true; break;
+				found = TRUE; break;
 			}
 		}
 		if (found) continue;
@@ -128,62 +141,94 @@ char* to_valid_filename(char* name, char* ext)
 }
 
 /*
- * Converts a windows error to human readable string
+ * Convert a windows error to human readable string
  * uses retval as errorcode, or, if 0, use GetLastError()
  */
-static char *windows_error_str(DWORD retval)
+const char *WindowsErrorString(void)
 {
-#define ERR_BUFFER_SIZE             256
-static char err_string[ERR_BUFFER_SIZE];
+static char err_string[256] = {0};
 
 	DWORD size;
 	DWORD error_code, format_error;
 
-	error_code = retval?retval:GetLastError();
+	error_code = GetLastError();
 
-	safe_sprintf(err_string, ERR_BUFFER_SIZE, "[%d] ", error_code);
+	safe_sprintf(err_string, sizeof(err_string), "[0x%08X] ", error_code);
 
-	size = FormatMessageU(FORMAT_MESSAGE_FROM_SYSTEM, NULL, error_code,
+	size = FormatMessageU(FORMAT_MESSAGE_FROM_SYSTEM|FORMAT_MESSAGE_IGNORE_INSERTS, NULL, HRESULT_CODE(error_code),
 		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), &err_string[strlen(err_string)],
-		ERR_BUFFER_SIZE-(DWORD)strlen(err_string), NULL);
+		sizeof(err_string)-(DWORD)strlen(err_string), NULL);
 	if (size == 0) {
 		format_error = GetLastError();
-		if (format_error)
-			safe_sprintf(err_string, ERR_BUFFER_SIZE,
-				"Windows error code %u (FormatMessage error code %u)", error_code, format_error);
+		if ((format_error) && (format_error != 0x13D))		// 0x13D, decode error, is returned for unknown codes
+			safe_sprintf(err_string, sizeof(err_string),
+				"Windows error code 0x%08X (FormatMessage error code 0x%08X)", error_code, format_error);
 		else
-			safe_sprintf(err_string, ERR_BUFFER_SIZE, "Unknown error code %u", error_code);
+			safe_sprintf(err_string, sizeof(err_string), "Unknown error 0x%08X", error_code);
 	}
+
+	SetLastError(error_code);	// Make sure we don't change the errorcode on exit
 	return err_string;
 }
 
 /*
  * Detect Windows version
  */
-void detect_windows_version(void)
+int detect_windows_version(void)
 {
-	OSVERSIONINFO os_version;
+	OSVERSIONINFOEXA vi, vi2;
+	unsigned major, minor;
+	ULONGLONG major_equal, minor_equal;
+	int nWindowsVersion;
 
-	memset(&os_version, 0, sizeof(OSVERSIONINFO));
-	os_version.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
-	windows_version = WINDOWS_UNSUPPORTED;
-	if ((GetVersionEx(&os_version) != 0) && (os_version.dwPlatformId == VER_PLATFORM_WIN32_NT)) {
-		if ((os_version.dwMajorVersion == 5) && (os_version.dwMinorVersion == 0)) {
-			windows_version = WINDOWS_2K;
-		} else if ((os_version.dwMajorVersion == 5) && (os_version.dwMinorVersion == 1)) {
-			windows_version = WINDOWS_XP;
-		} else if ((os_version.dwMajorVersion == 5) && (os_version.dwMinorVersion == 2)) {
-			windows_version = WINDOWS_2003_XP64;
-		} else if (os_version.dwMajorVersion == 6) {
-			if (os_version.dwBuildNumber < 7000) {
-				windows_version = WINDOWS_VISTA;
-			} else {
-				windows_version = WINDOWS_7;
+	nWindowsVersion = WINDOWS_UNDEFINED;
+
+	memset(&vi, 0, sizeof(vi));
+	vi.dwOSVersionInfoSize = sizeof(vi);
+	if (!GetVersionExA((OSVERSIONINFOA *)&vi)) {
+		memset(&vi, 0, sizeof(vi));
+		vi.dwOSVersionInfoSize = sizeof(OSVERSIONINFOA);
+		if (!GetVersionExA((OSVERSIONINFOA *)&vi))
+			return nWindowsVersion;
+	}
+
+	if (vi.dwPlatformId == VER_PLATFORM_WIN32_NT) {
+
+		if (vi.dwMajorVersion > 6 || (vi.dwMajorVersion == 6 && vi.dwMinorVersion >= 2)) {
+			// Starting with Windows 8.1 Preview, GetVersionEx() does no longer report the actual OS version
+			// See: http://msdn.microsoft.com/en-us/library/windows/desktop/dn302074.aspx
+
+			major_equal = VerSetConditionMask(0, VER_MAJORVERSION, VER_EQUAL);
+			for (major = vi.dwMajorVersion; major <= 9; major++) {
+				memset(&vi2, 0, sizeof(vi2));
+				vi2.dwOSVersionInfoSize = sizeof(vi2); vi2.dwMajorVersion = major;
+				if (!VerifyVersionInfoA(&vi2, VER_MAJORVERSION, major_equal))
+					continue;
+				if (vi.dwMajorVersion < major) {
+					vi.dwMajorVersion = major; vi.dwMinorVersion = 0;
+				}
+
+				minor_equal = VerSetConditionMask(0, VER_MINORVERSION, VER_EQUAL);
+				for (minor = vi.dwMinorVersion; minor <= 9; minor++) {
+					memset(&vi2, 0, sizeof(vi2)); vi2.dwOSVersionInfoSize = sizeof(vi2);
+					vi2.dwMinorVersion = minor;
+					if (!VerifyVersionInfoA(&vi2, VER_MINORVERSION, minor_equal))
+						continue;
+					vi.dwMinorVersion = minor;
+					break;
+				}
+
+				break;
 			}
-		} else if (os_version.dwMajorVersion >= 8) {
-			windows_version = WINDOWS_8;
+		}
+
+		if (vi.dwMajorVersion <= 0xf && vi.dwMinorVersion <= 0xf) {
+			nWindowsVersion = vi.dwMajorVersion << 4 | vi.dwMinorVersion;
+			if (nWindowsVersion < 0x51)
+				nWindowsVersion = WINDOWS_UNSUPPORTED;;
 		}
 	}
+	return nWindowsVersion;
 }
 
 /*
@@ -197,13 +242,13 @@ static PSID get_sid(void) {
 	char* psid_string = NULL;
 
 	if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
-		dprintf("OpenProcessToken failed: %s", windows_error_str(0));
+		dprintf("OpenProcessToken failed: %s", WindowsErrorString());
 		return NULL;
 	}
 
 	if (!GetTokenInformation(token, TokenUser, tu, 0, &len)) {
 		if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-			dprintf("GetTokenInformation (pre) failed: %s", windows_error_str(0));
+			dprintf("GetTokenInformation (pre) failed: %s", WindowsErrorString());
 			return NULL;
 		}
 		tu = (TOKEN_USER*)calloc(1, len);
@@ -219,11 +264,11 @@ static PSID get_sid(void) {
 		 * The workaround? Convert to string then back to PSID
 		 */
 		if (!ConvertSidToStringSidA(tu->User.Sid, &psid_string)) {
-			dprintf("unable to convert SID to string: %s", windows_error_str(0));
+			dprintf("unable to convert SID to string: %s", WindowsErrorString());
 			ret = NULL;
 		} else {
 			if (!ConvertStringSidToSidA(psid_string, &ret)) {
-				dprintf("unable to convert string back to SID: %s", windows_error_str(0));
+				dprintf("unable to convert string back to SID: %s", WindowsErrorString());
 				ret = NULL;
 			}
 			// MUST use LocalFree()
@@ -231,7 +276,7 @@ static PSID get_sid(void) {
 		}
 	} else {
 		ret = NULL;
-		dprintf("GetTokenInformation (real) failed: %s", windows_error_str(0));
+		dprintf("GetTokenInformation (real) failed: %s", WindowsErrorString());
 	}
 	free(tu);
 	return ret;
@@ -315,6 +360,7 @@ void browse_for_folder(void) {
 	WCHAR *fname;
 	char* tmp_path = NULL;
 
+	dialog_showing++;
 	// Even if we have Vista support with the compiler,
 	// it does not mean we have the Vista API available
 	INIT_VISTA_SHELL32;
@@ -378,12 +424,15 @@ void browse_for_folder(void) {
 			goto fallback;
 		}
 		pfod->lpVtbl->Release(pfod);
+		dialog_showing--;
 		return;
 	}
 fallback:
 	if (pfod != NULL) {
 		pfod->lpVtbl->Release(pfod);
 	}
+#else
+	dialog_showing++;
 #endif
 	INIT_XP_SHELL32;
 	memset(&bi, 0, sizeof(BROWSEINFOW));
@@ -397,20 +446,21 @@ fallback:
 	if (pidl != NULL) {
 		CoTaskMemFree(pidl);
 	}
+	dialog_showing--;
 }
 
 /*
  * read or write I/O to a file
  * buffer is allocated by the procedure. path is UTF-8
  */
-bool file_io(bool save, char* path, char** buffer, DWORD* size)
+BOOL file_io(BOOL save, char* path, char** buffer, DWORD* size)
 {
 	SECURITY_ATTRIBUTES s_attr, *ps = NULL;
 	SECURITY_DESCRIPTOR s_desc;
 	PSID sid = NULL;
 	HANDLE handle;
 	BOOL r;
-	bool ret = false;
+	BOOL ret = FALSE;
 
 	// Change the owner from admin to regular user
 	sid = get_sid();
@@ -422,7 +472,7 @@ bool file_io(bool save, char* path, char** buffer, DWORD* size)
 		s_attr.lpSecurityDescriptor = &s_desc;
 		ps = &s_attr;
 	} else {
-		dprintf("could not set security descriptor: %s", windows_error_str(0));
+		dprintf("could not set security descriptor: %s", WindowsErrorString());
 	}
 
 	if (!save) {
@@ -449,12 +499,12 @@ bool file_io(bool save, char* path, char** buffer, DWORD* size)
 	}
 
 	if (!r) {
-		dprintf("I/O Error: %s", windows_error_str(0));
+		dprintf("I/O Error: %s", WindowsErrorString());
 		goto out;
 	}
 
 	dsprintf("%s '%s'", save?"Saved file as":"Opened file", path);
-	ret = true;
+	ret = TRUE;
 
 out:
 	CloseHandle(handle);
@@ -473,7 +523,7 @@ out:
  * Will use the newer IFileOpenDialog if *compiled* for Vista or later
  * All string parameters are UTF-8
  */
-char* file_dialog(bool save, char* path, char* filename, char* ext, char* ext_desc)
+char* file_dialog(BOOL save, char* path, char* filename, char* ext, char* ext_desc)
 {
 	DWORD tmp;
 	OPENFILENAMEA ofn;
@@ -492,6 +542,7 @@ char* file_dialog(bool save, char* path, char* filename, char* ext, char* ext_de
 	wchar_t *wpath = NULL, *wfilename = NULL;
 	IShellItem *si_path = NULL;	// Automatically freed
 
+	dialog_showing++;
 	INIT_VISTA_SHELL32;
 	if (IS_VISTA_SHELL32_AVAILABLE) {
 		// Setup the file extension filter table
@@ -556,6 +607,7 @@ char* file_dialog(bool save, char* path, char* filename, char* ext, char* ext_de
 			goto fallback;
 		}
 		pfd->lpVtbl->Release(pfd);
+		dialog_showing--;
 		return filepath;
 	}
 
@@ -563,6 +615,8 @@ fallback:
 	if (pfd != NULL) {
 		pfd->lpVtbl->Release(pfd);
 	}
+#else
+	dialog_showing++;
 #endif
 
 	memset(&ofn, 0, sizeof(ofn));
@@ -575,6 +629,8 @@ fallback:
 	// Set the file extension filters
 	ext_strlen = strlen(ext_desc) + 2*strlen(ext) + sizeof(" (*.)\0*.\0All Files (*.*)\0*.*\0\0");
 	ext_string = (char*)malloc(ext_strlen);
+	if (ext_string == NULL)
+		return NULL;
 	safe_sprintf(ext_string, ext_strlen, "%s (*.%s)\r*.%s\rAll Files (*.*)\r*.*\r\0", ext_desc, ext, ext);
 	// Microsoft could really have picked a better delimiter!
 	for (i=0; i<ext_strlen; i++) {
@@ -601,6 +657,7 @@ fallback:
 		}
 	}
 	safe_free(ext_string);
+	dialog_showing--;
 	return filepath;
 }
 
@@ -624,35 +681,30 @@ void create_status_bar(void)
 }
 
 /*
- * Center a dialog with regards to the main application Window
+ * Center a dialog with regards to the main application Window or the desktop
+ * See http://msdn.microsoft.com/en-us/library/windows/desktop/ms644996.aspx#init_box
  */
-void center_dialog(HWND dialog)
+void center_dialog(HWND hDlg)
 {
-	POINT Point;
-	RECT DialogRect;
-	RECT ParentRect;
-	int nWidth;
-	int nHeight;
+	HWND hParent;
+	RECT rc, rcDlg, rcParent;
 
-	// Get the size of the dialog box.
-	GetWindowRect(dialog, &DialogRect);
-	GetClientRect(hMain, &ParentRect);
+	if ((hParent = GetParent(hDlg)) == NULL) {
+		hParent = GetDesktopWindow();
+	}
 
-	// Calculate the height and width of the current dialog
-	nWidth = DialogRect.right - DialogRect.left;
-	nHeight = DialogRect.bottom - DialogRect.top;
+	GetWindowRect(hParent, &rcParent);
+	GetWindowRect(hDlg, &rcDlg);
+	CopyRect(&rc, &rcParent);
 
-	// Find the center point and convert to screen coordinates.
-	Point.x = (ParentRect.right - ParentRect.left) / 2;
-	Point.y = (ParentRect.bottom - ParentRect.top) / 2;
-	ClientToScreen(hMain, &Point);
+	// Offset the parent and dialog box rectangles so that right and bottom
+	// values represent the width and height, and then offset the parent again
+	// to discard space taken up by the dialog box.
+	OffsetRect(&rcDlg, -rcDlg.left, -rcDlg.top);
+	OffsetRect(&rc, -rc.left, -rc.top);
+	OffsetRect(&rc, -rcDlg.right, -rcDlg.bottom);
 
-	// Calculate the new x, y starting point.
-	Point.x -= nWidth / 2;
-	Point.y -= nHeight / 2 + 35;
-
-	// Move the window.
-	MoveWindow(dialog, Point.x, Point.y, nWidth, nHeight, FALSE);
+	SetWindowPos(hDlg, HWND_TOP, rcParent.left + (rc.right / 2), rcParent.top + (rc.bottom / 2) - 25, 0, 0, SWP_NOSIZE);
 }
 
 /*
@@ -676,35 +728,53 @@ INT_PTR CALLBACK license_callback(HWND hDlg, UINT message, WPARAM wParam, LPARAM
 	return (INT_PTR)FALSE;
 }
 
-
 /*
  * About dialog callback
  */
 INT_PTR CALLBACK about_callback(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
+	int i;
+	const int edit_id[2] = {IDC_ABOUT_BLURB, IDC_ABOUT_COPYRIGHTS};
+	char about_blurb[2048];
+	const char* edit_text[2] = {about_blurb, additional_copyrights};
+	HWND hEdit[2];
+	TEXTRANGEW tr;
+	ENLINK* enl;
+	wchar_t wUrl[256];
+
 	switch (message) {
 	case WM_INITDIALOG:
+		dialog_showing++;
+		set_title_bar_icon(hDlg);
 		center_dialog(hDlg);
-		SetDlgItemTextA(hDlg, IDC_ABOUT_COPYRIGHTS, additional_copyrights);
-		break;
-	case WM_CTLCOLORSTATIC:
-		if ((HWND)lParam == GetDlgItem(hDlg, IDC_ZADIG_BOLD)) {
-			SetBkMode((HDC)wParam, TRANSPARENT);
-			SelectObject((HDC)wParam, bold_font);
-			return (INT_PTR)CreateSolidBrush(GetSysColor(COLOR_BTNFACE));
+		if (reg_commcheck)
+			ShowWindow(GetDlgItem(hDlg, IDC_ABOUT_UPDATES), SW_SHOW);
+		safe_sprintf(about_blurb, sizeof(about_blurb), about_blurb_format,
+			application_version[0], application_version[1], application_version[2], application_version[3]);
+		for (i=0; i<ARRAYSIZE(hEdit); i++) {
+			hEdit[i] = GetDlgItem(hDlg, edit_id[i]);
+			SendMessage(hEdit[i], EM_AUTOURLDETECT, 1, 0);
+			/* Can't use SetDlgItemText, because it only works with RichEdit20A... and VS insists
+			 * on reverting to RichEdit20W as soon as you edit the dialog. You can try all the W
+			 * methods you want, it JUST WON'T WORK unless you use EM_SETTEXTEX. Also see:
+			 * http://blog.kowalczyk.info/article/eny/Setting-unicode-rtf-text-in-rich-edit-control.html */
+			SendMessageA(hEdit[i], EM_SETTEXTEX, (WPARAM)&friggin_microsoft_unicode_amateurs, (LPARAM)edit_text[i]);
+			SendMessage(hEdit[i], EM_SETSEL, -1, -1);
+			SendMessage(hEdit[i], EM_SETEVENTMASK, 0, ENM_LINK);
+			SendMessage(hEdit[i], EM_SETBKGNDCOLOR, 0, (LPARAM)GetSysColor(COLOR_BTNFACE));
 		}
 		break;
 	case WM_NOTIFY:
 		switch (((LPNMHDR)lParam)->code) {
-		case NM_CLICK:
-		case NM_RETURN:
-			switch (LOWORD(wParam)) {
-			case IDC_ABOUT_LIBWDI_URL:
-				ShellExecuteA(hDlg, "open", LIBWDI_URL, NULL, NULL, SW_SHOWNORMAL);
-				break;
-			case IDC_ABOUT_BUG_URL:
-				ShellExecuteA(hDlg, "open", BUG_URL, NULL, NULL, SW_SHOWNORMAL);
-				break;
+		case EN_LINK:
+			enl = (ENLINK*) lParam;
+			if (enl->msg == WM_LBUTTONUP) {
+				tr.lpstrText = wUrl;
+				tr.chrg.cpMin = enl->chrg.cpMin;
+				tr.chrg.cpMax = enl->chrg.cpMax;
+				SendMessageW(enl->nmhdr.hwndFrom, EM_GETTEXTRANGE, 0, (LPARAM)&tr);
+				wUrl[ARRAYSIZE(wUrl)-1] = 0;
+				ShellExecuteW(hDlg, L"open", wUrl, NULL, NULL, SW_SHOWNORMAL);
 			}
 			break;
 		}
@@ -714,9 +784,13 @@ INT_PTR CALLBACK about_callback(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 		case IDOK:
 		case IDCANCEL:
 			EndDialog(hDlg, LOWORD(wParam));
+			dialog_showing--;
 			return (INT_PTR)TRUE;
 		case IDC_ABOUT_LICENSE:
-			DialogBoxA(main_instance, MAKEINTRESOURCEA(IDD_LICENSE), hDlg, license_callback);
+			DialogBoxW(main_instance, MAKEINTRESOURCEW(IDD_LICENSE), hDlg, license_callback);
+			break;
+		case IDC_ABOUT_UPDATES:
+			DialogBoxW(main_instance, MAKEINTRESOURCEW(IDD_UPDATE_POLICY), hDlg, UpdateCallback);
 			break;
 		}
 		break;
@@ -731,7 +805,7 @@ INT_PTR CALLBACK notification_callback(HWND hDlg, UINT message, WPARAM wParam, L
 {
 	LRESULT loc;
 	int i;
-	// Prevent resising
+	// Prevent resizing
 	static LRESULT disabled[9] = { HTLEFT, HTRIGHT, HTTOP, HTBOTTOM, HTSIZE,
 		HTTOPLEFT, HTTOPRIGHT, HTBOTTOMLEFT, HTBOTTOMRIGHT };
 	static HBRUSH white_brush, separator_brush;
@@ -740,18 +814,28 @@ INT_PTR CALLBACK notification_callback(HWND hDlg, UINT message, WPARAM wParam, L
 	case WM_INITDIALOG:
 		white_brush = CreateSolidBrush(WHITE);
 		separator_brush = CreateSolidBrush(SEPARATOR_GREY);
+		set_title_bar_icon(hDlg);
 		center_dialog(hDlg);
 		// Change the default icon
 		if (Static_SetIcon(GetDlgItem(hDlg, IDC_NOTIFICATION_ICON), hMessageIcon) == 0) {
-			dprintf("could not set dialog icon");
+			dprintf("Could not set dialog icon\n");
 		}
 		// Set the dialog title
-		if (message_title != NULL) {
-			SetWindowTextA(hDlg, message_title);
+		if (szMessageTitle != NULL) {
+			SetWindowTextU(hDlg, szMessageTitle);
+		}
+		// Enable/disable the buttons and set text
+		if (!notification_is_question) {
+			SetWindowTextU(GetDlgItem(hDlg, IDNO), "Close");
+		} else {
+			ShowWindow(GetDlgItem(hDlg, IDYES), SW_SHOW);
+		}
+		if ((notification_more_info != NULL) && (notification_more_info->callback != NULL)) {
+			ShowWindow(GetDlgItem(hDlg, IDC_MORE_INFO), SW_SHOW);
 		}
 		// Set the control text
-		if (message_text != NULL) {
-			SetWindowTextA(GetDlgItem(hDlg, IDC_NOTIFICATION_TEXT), message_text);
+		if (szMessageText != NULL) {
+			SetWindowTextU(GetDlgItem(hDlg, IDC_NOTIFICATION_TEXT), szMessageText);
 		}
 		return (INT_PTR)TRUE;
 	case WM_CTLCOLORSTATIC:
@@ -774,9 +858,15 @@ INT_PTR CALLBACK notification_callback(HWND hDlg, UINT message, WPARAM wParam, L
 		switch (LOWORD(wParam)) {
 		case IDOK:
 		case IDCANCEL:
-		case IDC_NOTIFICATION_CLOSE:
+		case IDYES:
+		case IDNO:
 			EndDialog(hDlg, LOWORD(wParam));
 			return (INT_PTR)TRUE;
+		case IDC_MORE_INFO:
+			if (notification_more_info != NULL)
+				DialogBoxW(main_instance, MAKEINTRESOURCEW(notification_more_info->id),
+					hDlg, notification_more_info->callback);
+			break;
 		}
 		break;
 	}
@@ -786,10 +876,22 @@ INT_PTR CALLBACK notification_callback(HWND hDlg, UINT message, WPARAM wParam, L
 /*
  * Display a custom notification
  */
-void notification(int type, char* text, char* title)
+BOOL notification(int type, const notification_info* more_info, char* title, char* format, ...)
 {
-	message_text = text;
-	message_title = title;
+	BOOL ret;
+	va_list args;
+
+	dialog_showing++;
+	szMessageText = (char*)malloc(MAX_PATH);
+	if (szMessageText == NULL) return FALSE;
+	szMessageTitle = title;
+	va_start(args, format);
+	safe_vsnprintf(szMessageText, MAX_PATH-1, format, args);
+	va_end(args);
+	szMessageText[MAX_PATH-1] = 0;
+	notification_more_info = more_info;
+	notification_is_question = FALSE;
+
 	switch(type) {
 	case MSG_WARNING:
 		hMessageIcon = LoadIcon(NULL, IDI_WARNING);
@@ -797,13 +899,19 @@ void notification(int type, char* text, char* title)
 	case MSG_ERROR:
 		hMessageIcon = LoadIcon(NULL, IDI_ERROR);
 		break;
+	case MSG_QUESTION:
+		hMessageIcon = LoadIcon(NULL, IDI_QUESTION);
+		notification_is_question = TRUE;
+		break;
 	case MSG_INFO:
 	default:
 		hMessageIcon = LoadIcon(NULL, IDI_INFORMATION);
 		break;
 	}
-	DialogBox(main_instance, MAKEINTRESOURCE(IDD_NOTIFICATION), hMain, notification_callback);
-	message_text = NULL;
+	ret = (DialogBox(main_instance, MAKEINTRESOURCE(IDD_NOTIFICATION), hMain, notification_callback) == IDYES);
+	safe_free(szMessageText);
+	dialog_showing--;
+	return ret;
 }
 
 struct {
@@ -915,4 +1023,316 @@ void destroy_all_tooltips(void)
 		DestroyWindow(ttlist[i].hTip);
 		safe_free(ttlist[i].wstring);
 	}
+}
+
+/*
+ * Update policy and settings dialog callback
+ */
+INT_PTR CALLBACK UpdateCallback(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	HWND hPolicy;
+	static HWND hFrequency, hBeta;
+	int32_t freq;
+	char update_policy_text[4096];
+
+	switch (message) {
+	case WM_INITDIALOG:
+		set_title_bar_icon(hDlg);
+		center_dialog(hDlg);
+		hFrequency = GetDlgItem(hDlg, IDC_UPDATE_FREQUENCY);
+		hBeta = GetDlgItem(hDlg, IDC_INCLUDE_BETAS);
+		IGNORE_RETVAL(ComboBox_SetItemData(hFrequency, ComboBox_AddStringU(hFrequency, "Disabled"), -1));
+		IGNORE_RETVAL(ComboBox_SetItemData(hFrequency, ComboBox_AddStringU(hFrequency, "Daily (Default)"), 86400));
+		IGNORE_RETVAL(ComboBox_SetItemData(hFrequency, ComboBox_AddStringU(hFrequency, "Weekly"), 604800));
+		IGNORE_RETVAL(ComboBox_SetItemData(hFrequency, ComboBox_AddStringU(hFrequency, "Monthly"), 2629800));
+		freq = ReadRegistryKey32(REGKEY_HKCU, REGKEY_UPDATE_INTERVAL);
+		EnableWindow(GetDlgItem(hDlg, IDC_CHECK_NOW), (freq != 0));
+		EnableWindow(hBeta, (freq >= 0));
+		switch(freq) {
+		case -1:
+			IGNORE_RETVAL(ComboBox_SetCurSel(hFrequency, 0));
+			break;
+		case 0:
+		case 86400:
+			IGNORE_RETVAL(ComboBox_SetCurSel(hFrequency, 1));
+			break;
+		case 604800:
+			IGNORE_RETVAL(ComboBox_SetCurSel(hFrequency, 2));
+			break;
+		case 2629800:
+			IGNORE_RETVAL(ComboBox_SetCurSel(hFrequency, 3));
+			break;
+		default:
+			IGNORE_RETVAL(ComboBox_SetItemData(hFrequency, ComboBox_AddStringU(hFrequency, "Custom"), freq));
+			IGNORE_RETVAL(ComboBox_SetCurSel(hFrequency, 4));
+			break;
+		}
+		IGNORE_RETVAL(ComboBox_AddStringU(hBeta, "Yes"));
+		IGNORE_RETVAL(ComboBox_AddStringU(hBeta, "No"));
+		IGNORE_RETVAL(ComboBox_SetCurSel(hBeta, GetRegistryKeyBool(REGKEY_HKCU, REGKEY_INCLUDE_BETAS)?0:1));
+		hPolicy = GetDlgItem(hDlg, IDC_POLICY);
+		SendMessage(hPolicy, EM_AUTOURLDETECT, 1, 0);
+		safe_sprintf(update_policy_text, sizeof(update_policy_text), update_policy);
+		SendMessageA(hPolicy, EM_SETTEXTEX, (WPARAM)&friggin_microsoft_unicode_amateurs, (LPARAM)update_policy_text);
+		SendMessage(hPolicy, EM_SETSEL, -1, -1);
+		SendMessage(hPolicy, EM_SETEVENTMASK, 0, ENM_LINK);
+		SendMessageA(hPolicy, EM_SETBKGNDCOLOR, 0, (LPARAM)GetSysColor(COLOR_BTNFACE));
+		break;
+	case WM_COMMAND:
+		switch (LOWORD(wParam)) {
+		case IDCLOSE:
+		case IDCANCEL:
+			EndDialog(hDlg, LOWORD(wParam));
+			return (INT_PTR)TRUE;
+		case IDC_CHECK_NOW:
+			CheckForUpdates(TRUE);
+			return (INT_PTR)TRUE;
+		case IDC_UPDATE_FREQUENCY:
+			if (HIWORD(wParam) != CBN_SELCHANGE)
+				break;
+			freq = (int32_t)ComboBox_GetItemData(hFrequency, ComboBox_GetCurSel(hFrequency));
+			WriteRegistryKey32(REGKEY_HKCU, REGKEY_UPDATE_INTERVAL, (DWORD)freq);
+			EnableWindow(hBeta, (freq >= 0));
+			return (INT_PTR)TRUE;
+		case IDC_INCLUDE_BETAS:
+			if (HIWORD(wParam) != CBN_SELCHANGE)
+				break;
+			SetRegistryKeyBool(REGKEY_HKCU, REGKEY_INCLUDE_BETAS, ComboBox_GetCurSel(hBeta) == 0);
+			return (INT_PTR)TRUE;
+		}
+		break;
+	}
+	return (INT_PTR)FALSE;
+}
+
+/*
+ * Initial update check setup
+ */
+BOOL SetUpdateCheck(void)
+{
+	BOOL enable_updates;
+	DWORD commcheck = GetTickCount();
+	notification_info more_info = { IDD_UPDATE_POLICY, UpdateCallback };
+	char filename[MAX_PATH] = "", exename[] = APPLICATION_NAME ".exe";
+	size_t fn_len, exe_len;
+
+	// Test if we have access to the registry. If not, forget it.
+	WriteRegistryKey32(REGKEY_HKCU, REGKEY_COMM_CHECK, commcheck);
+	if (ReadRegistryKey32(REGKEY_HKCU, REGKEY_COMM_CHECK) != commcheck)
+		return FALSE;
+	reg_commcheck = TRUE;
+
+	// If the update interval is not set, this is the first time we run so prompt the user
+	if (ReadRegistryKey32(REGKEY_HKCU, REGKEY_UPDATE_INTERVAL) == 0) {
+
+		// Add a hack for people who'd prefer the app not to prompt about update settings on first run.
+		// If the executable is called "<app_name>.exe", without version, we disable the prompt
+		GetModuleFileNameU(NULL, filename, sizeof(filename));
+		fn_len = safe_strlen(filename);
+		exe_len = safe_strlen(exename);
+		if ((fn_len > exe_len) && (safe_stricmp(&filename[fn_len-exe_len], exename) == 0)) {
+			dprintf("Short name used - Disabling initial update policy prompt\n");
+			enable_updates = TRUE;
+		} else {
+			enable_updates = notification(MSG_QUESTION, &more_info, APPLICATION_NAME " update policy",
+				"Do you want to allow " APPLICATION_NAME " to check for application updates online?");
+		}
+		if (!enable_updates) {
+			WriteRegistryKey32(REGKEY_HKCU, REGKEY_UPDATE_INTERVAL, -1);
+			return FALSE;
+		}
+		// If the user hasn't set the interval in the dialog, set to default
+		if ( (ReadRegistryKey32(REGKEY_HKCU, REGKEY_UPDATE_INTERVAL) == 0) ||
+			 ((ReadRegistryKey32(REGKEY_HKCU, REGKEY_UPDATE_INTERVAL) == -1) && enable_updates) )
+			WriteRegistryKey32(REGKEY_HKCU, REGKEY_UPDATE_INTERVAL, 86400);
+	}
+	return TRUE;
+}
+
+static void CreateStaticFont(HDC dc, HFONT* hyperlink_font) {
+	TEXTMETRIC tm;
+	LOGFONT lf;
+
+	if (*hyperlink_font != NULL)
+		return;
+	GetTextMetrics(dc, &tm);
+	lf.lfHeight = tm.tmHeight;
+	lf.lfWidth = 0;
+	lf.lfEscapement = 0;
+	lf.lfOrientation = 0;
+	lf.lfWeight = tm.tmWeight;
+	lf.lfItalic = tm.tmItalic;
+	lf.lfUnderline = TRUE;
+	lf.lfStrikeOut = tm.tmStruckOut;
+	lf.lfCharSet = tm.tmCharSet;
+	lf.lfOutPrecision = OUT_DEFAULT_PRECIS;
+	lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+	lf.lfQuality = DEFAULT_QUALITY;
+	lf.lfPitchAndFamily = tm.tmPitchAndFamily;
+	GetTextFace(dc, LF_FACESIZE, lf.lfFaceName);
+	*hyperlink_font = CreateFontIndirect(&lf);
+}
+
+/*
+ * Work around the limitations of edit control, to display a hand cursor for hyperlinks
+ * NB: The LTEXT control must have SS_NOTIFY attribute for this to work
+ */
+static INT_PTR CALLBACK subclass_callback(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	switch (message)
+	{
+	case WM_SETCURSOR:
+		if ((HWND)wParam == GetDlgItem(hDlg, IDC_WEBSITE)) {
+			SetCursor(LoadCursor(NULL, IDC_HAND));
+			return (INT_PTR)TRUE;
+		}
+		break;
+	}
+	return CallWindowProc(original_wndproc, hDlg, message, wParam, lParam);
+}
+
+/*
+ * New version notification dialog
+ */
+INT_PTR CALLBACK new_version_callback(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	int i;
+	HWND hNotes;
+	char tmp[128], cmdline[] = APPLICATION_NAME " /W";
+	static char* filepath = NULL;
+	static int download_status = 0;
+	STARTUPINFOA si;
+	PROCESS_INFORMATION pi;
+	HFONT hyperlink_font = NULL;
+
+	switch (message) {
+	case WM_INITDIALOG:
+		download_status = 0;
+		set_title_bar_icon(hDlg);
+		center_dialog(hDlg);
+		// Subclass the callback so that we can change the cursor
+		original_wndproc = (WNDPROC)SetWindowLongPtr(hDlg, GWLP_WNDPROC, (LONG_PTR)subclass_callback);
+		hNotes = GetDlgItem(hDlg, IDC_RELEASE_NOTES);
+		SendMessage(hNotes, EM_AUTOURLDETECT, 1, 0);
+		SendMessageA(hNotes, EM_SETTEXTEX, (WPARAM)&friggin_microsoft_unicode_amateurs, (LPARAM)update.release_notes);
+		SendMessage(hNotes, EM_SETSEL, -1, -1);
+		SendMessage(hNotes, EM_SETEVENTMASK, 0, ENM_LINK);
+		safe_sprintf(tmp, sizeof(tmp), "Your version: %d.%d.%d (Build %d)",
+			application_version[0], application_version[1], application_version[2], application_version[3]);
+		SetWindowTextU(GetDlgItem(hDlg, IDC_YOUR_VERSION), tmp);
+		safe_sprintf(tmp, sizeof(tmp), "Latest version: %d.%d.%d (Build %d)",
+			update.version[0], update.version[1], update.version[2], update.version[3]);
+		SetWindowTextU(GetDlgItem(hDlg, IDC_LATEST_VERSION), tmp);
+		SetWindowTextU(GetDlgItem(hDlg, IDC_DOWNLOAD_URL), update.download_url);
+		SendMessage(GetDlgItem(hDlg, IDC_PROGRESS), PBM_SETRANGE, 0, (MAX_PROGRESS<<16) & 0xFFFF0000);
+		if (update.download_url == NULL)
+			EnableWindow(GetDlgItem(hDlg, IDC_DOWNLOAD), FALSE);
+		break;
+	case WM_CTLCOLORSTATIC:
+		if ((HWND)lParam != GetDlgItem(hDlg, IDC_WEBSITE))
+			return FALSE;
+		// Change the font for the hyperlink
+		SetBkMode((HDC)wParam, TRANSPARENT);
+		CreateStaticFont((HDC)wParam, &hyperlink_font);
+		SelectObject((HDC)wParam, hyperlink_font);
+		SetTextColor((HDC)wParam, RGB(0,0,125));	// DARK_BLUE
+		return (INT_PTR)CreateSolidBrush(GetSysColor(COLOR_BTNFACE));
+	case WM_COMMAND:
+		switch (LOWORD(wParam)) {
+		case IDCLOSE:
+		case IDCANCEL:
+			safe_free(filepath);
+			EndDialog(hDlg, LOWORD(wParam));
+			return (INT_PTR)TRUE;
+		case IDC_WEBSITE:
+			ShellExecuteA(hDlg, "open", APPLICATION_URL, NULL, NULL, SW_SHOWNORMAL);
+			break;
+		case IDC_DOWNLOAD:	// Also doubles as abort and launch function
+			switch(download_status) {
+			case 1:		// Abort
+				download_error = ERROR_SEVERITY_ERROR|ERROR_CANCELLED;
+				break;
+			case 2:		// Launch newer version and close this one
+				memset(&si, 0, sizeof(si));
+				memset(&pi, 0, sizeof(pi));
+				si.cb = sizeof(si);
+				if (!CreateProcessU(filepath, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+					print_status(0, FALSE, "Failed to launch new application");
+					// TODO: produce a message box and add a retry in case the file is in use
+					dprintf("Failed to launch new application: %s\n", WindowsErrorString());
+				} else {
+					print_status(0, FALSE, "Launching new application...");
+					PostMessage(hDlg, WM_COMMAND, (WPARAM)IDCLOSE, 0);
+					PostMessage(hMain, WM_CLOSE, 0, 0);
+				}
+				break;
+			default:	// Download
+				for (i=(int)safe_strlen(update.download_url); (i>0)&&(update.download_url[i]!='/'); i--);
+				filepath = file_dialog(TRUE, app_dir, (char*)&update.download_url[i+1], "exe", "Application");
+				if (filepath != NULL)
+					DownloadFileThreaded(update.download_url, filepath, hDlg);
+				break;
+			}
+			return (INT_PTR)TRUE;
+		}
+		break;
+	case UM_DOWNLOAD_INIT:
+		download_error = 0;
+		download_status = 1;
+		SetWindowTextU(GetDlgItem(hDlg, IDC_DOWNLOAD), "Abort");
+		return (INT_PTR)TRUE;
+	case UM_DOWNLOAD_EXIT:
+		if (wParam) {
+			SetWindowTextU(GetDlgItem(hDlg, IDC_DOWNLOAD), "Launch");
+			download_status = 2;
+		} else {
+			SetWindowTextU(GetDlgItem(hDlg, IDC_DOWNLOAD), "Download");
+			download_status = 0;
+		}
+		return (INT_PTR)TRUE;
+	}
+	return (INT_PTR)FALSE;
+}
+
+void download_new_version(void)
+{
+	DialogBoxW(main_instance, MAKEINTRESOURCEW(IDD_NEW_VERSION), hMain, new_version_callback);
+}
+
+void set_title_bar_icon(HWND hDlg)
+{
+	HDC hDC;
+	int i16, s16, s32;
+	HICON hSmallIcon, hBigIcon;
+
+	// High DPI scaling
+	i16 = GetSystemMetrics(SM_CXSMICON);
+	hDC = GetDC(hDlg);
+	fScale = GetDeviceCaps(hDC, LOGPIXELSX) / 96.0f;
+	ReleaseDC(hDlg, hDC);
+	// Adjust icon size lookup
+	s16 = i16;
+	s32 = (int)(32.0f*fScale);
+	if (s16 >= 54)
+		s16 = 64;
+	else if (s16 >= 40)
+		s16 = 48;
+	else if (s16 >= 28)
+		s16 = 32;
+	else if (s16 >= 20)
+		s16 = 24;
+	if (s32 >= 54)
+		s32 = 64;
+	else if (s32 >= 40)
+		s32 = 48;
+	else if (s32 >= 28)
+		s32 = 32;
+	else if (s32 >= 20)
+		s32 = 24;
+
+	// Create the title bar icon
+	hSmallIcon = (HICON)LoadImage(main_instance, MAKEINTRESOURCE(IDI_ZADIG), IMAGE_ICON, s16, s16, 0);
+	SendMessage (hDlg, WM_SETICON, ICON_SMALL, (LPARAM)hSmallIcon);
+	hBigIcon = (HICON)LoadImage(main_instance, MAKEINTRESOURCE(IDI_ZADIG), IMAGE_ICON, s32, s32, 0);
+	SendMessage (hDlg, WM_SETICON, ICON_BIG, (LPARAM)hBigIcon);
 }

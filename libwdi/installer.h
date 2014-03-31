@@ -1,6 +1,6 @@
 /*
  * Library for WinUSB/libusb automated driver installation
- * Copyright (c) 2010 Pete Batard <pbatard@gmail.com>
+ * Copyright (c) 2010-2013 Pete Batard <pete@akeo.ie>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,15 +20,6 @@
 
 #include <windows.h>
 #include <objbase.h>
-#if !defined(bool)
-#define bool BOOL
-#endif
-#if !defined(true)
-#define true TRUE
-#endif
-#if !defined(false)
-#define false FALSE
-#endif
 
 #define MAX_DESC_LENGTH             256
 #define MAX_PATH_LENGTH             512
@@ -51,7 +42,7 @@
 #define safe_stricmp(str1, str2) _stricmp(((str1==NULL)?"<NULL>":str1), ((str2==NULL)?"<NULL>":str2))
 #define safe_strncmp(str1, str2, count) strncmp(((str1==NULL)?"<NULL>":str1), ((str2==NULL)?"<NULL>":str2), count)
 #define safe_closehandle(h) do {if (h != INVALID_HANDLE_VALUE) {CloseHandle(h); h = INVALID_HANDLE_VALUE;}} while(0)
-#define safe_sprintf _snprintf
+#define safe_sprintf(dst, count, ...) do {_snprintf(dst, count, __VA_ARGS__); (dst)[(count)-1] = 0; } while(0)
 #define safe_strlen(str) ((((char*)str)==NULL)?0:strlen(str))
 #define static_sprintf(dest, format, ...) safe_sprintf(dest, sizeof(dest), format, __VA_ARGS__)
 #define safe_swprintf _snwprintf
@@ -59,6 +50,7 @@
 #ifndef ARRAYSIZE
 #define ARRAYSIZE(A) (sizeof(A)/sizeof((A)[0]))
 #endif
+#define IGNORE_RETVAL(expr) do { (void)(expr); } while(0)
 
 #if defined(_MSC_VER)
 #define safe_vsnprintf(buf, size, format, arg) _vsnprintf_s(buf, size, _TRUNCATE, format, arg)
@@ -84,14 +76,16 @@ enum installer_code {
 /*
  * Windows versions
  */
-enum windows_version {
-	WINDOWS_UNDEFINED,
-	WINDOWS_UNSUPPORTED,
-	WINDOWS_2K,
-	WINDOWS_XP,
-	WINDOWS_2003_XP64,
-	WINDOWS_VISTA,
-	WINDOWS_7
+enum WindowsVersion {
+	WINDOWS_UNDEFINED = -1,
+	WINDOWS_UNSUPPORTED = 0,
+	WINDOWS_XP = 0x51,
+	WINDOWS_2003 = 0x52,	// Also XP x64
+	WINDOWS_VISTA = 0x60,
+	WINDOWS_7 = 0x61,
+	WINDOWS_8 = 0x62,
+	WINDOWS_8_1_OR_LATER = 0x63,
+	WINDOWS_MAX
 };
 
 /*

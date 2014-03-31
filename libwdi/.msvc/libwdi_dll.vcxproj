@@ -19,27 +19,31 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectName>libwdi (static)</ProjectName>
-    <ProjectGuid>{9AA0E745-1A0A-4700-8ECB-6A6DE9DBF8B9}</ProjectGuid>
+    <ProjectName>libwdi (dll)</ProjectName>
+    <ProjectGuid>{79275348-41A4-4D07-8990-4068C9594A2C}</ProjectGuid>
     <RootNamespace>libwdi</RootNamespace>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
-    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
+    <PlatformToolset>v110</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
-    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v110</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v110</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
-    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v110</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -59,14 +63,14 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <_ProjectFileVersion>10.0.30319.1</_ProjectFileVersion>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)$(Platform)\$(Configuration)\lib\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)$(Platform)\$(Configuration)\lib\libwdi\</IntDir>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)$(Platform)\$(Configuration)\lib\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)$(Platform)\$(Configuration)\lib\libwdi\</IntDir>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)$(Platform)\$(Configuration)\lib\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)$(Platform)\$(Configuration)\lib\libwdi\</IntDir>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)$(Platform)\$(Configuration)\lib\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)$(Platform)\$(Configuration)\lib\libwdi\</IntDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)$(Platform)\$(Configuration)\dll\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)$(Platform)\$(Configuration)\dll\libwdi\</IntDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)$(Platform)\$(Configuration)\dll\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)$(Platform)\$(Configuration)\dll\libwdi\</IntDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)$(Platform)\$(Configuration)\dll\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)$(Platform)\$(Configuration)\dll\libwdi\</IntDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)$(Platform)\$(Configuration)\dll\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)$(Platform)\$(Configuration)\dll\libwdi\</IntDir>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">libwdi</TargetName>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">libwdi</TargetName>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">libwdi</TargetName>
@@ -76,116 +80,103 @@
     <PreBuildEvent>
       <Message>Embedding binary resources</Message>
       <Command>cd $(ProjectDir)\..
-if exist embedded.no_is ren embedded.no_is embedded.h
 embedder embedded.h</Command>
     </PreBuildEvent>
     <ClCompile>
+      <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>..\..\msvc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>DEBUG;_DEBUG;_WIN32;_LIB;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <MinimalRebuild>true</MinimalRebuild>
-      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PreprocessorDefinitions>DEBUG;_DEBUG;_WIN32;_LIB;_CRT_SECURE_NO_WARNINGS;DLL_EXPORT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <WarningLevel>Level3</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <Optimization>Disabled</Optimization>
+      <ExceptionHandling>false</ExceptionHandling>
+      <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>E:\WinDDK\7600.16385.0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
-    <Lib>
-      <OutputFile>$(OutDir)libwdi.lib</OutputFile>
-    </Lib>
-    <PostBuildEvent>
-      <Command>cd $(ProjectDir)\..
-ren embedded.h embedded.no_is</Command>
-    </PostBuildEvent>
-    <PostBuildEvent>
-      <Message>rename embedded.h, to avoid Intellisense hogging CPU time parsing it</Message>
-    </PostBuildEvent>
+    <Link>
+      <AdditionalDependencies>setupapi.lib;newdev.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <OutputFile>$(OutDir)libwdi.dll</OutputFile>
+      <ModuleDefinitionFile>../libwdi.def</ModuleDefinitionFile>
+      <EmbedManagedResourceFile>../libwdi.rc;%(EmbedManagedResourceFile)</EmbedManagedResourceFile>
+    </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <PreBuildEvent>
       <Message>Embedding binary resources</Message>
       <Command>cd $(ProjectDir)\..
-if exist embedded.no_is ren embedded.no_is embedded.h
 embedder embedded.h</Command>
     </PreBuildEvent>
     <ClCompile>
+      <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>..\..\msvc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>DEBUG;_DEBUG;_WIN32;_WIN64;_LIB;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PreprocessorDefinitions>DEBUG;_DEBUG;_WIN32;_WIN64;_LIB;_CRT_SECURE_NO_WARNINGS;DLL_EXPORT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <WarningLevel>Level3</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <Optimization>Disabled</Optimization>
+      <ExceptionHandling>false</ExceptionHandling>
+      <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>E:\WinDDK\7600.16385.0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
-    <Lib>
-      <OutputFile>$(OutDir)libwdi.lib</OutputFile>
-    </Lib>
-    <PostBuildEvent>
-      <Command>cd $(ProjectDir)\..
-ren embedded.h embedded.no_is</Command>
-    </PostBuildEvent>
-    <PostBuildEvent>
-      <Message>rename embedded.h, to avoid Intellisense hogging CPU time parsing it</Message>
-    </PostBuildEvent>
+    <Link>
+      <AdditionalDependencies>setupapi.lib;newdev.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <OutputFile>$(OutDir)libwdi.dll</OutputFile>
+      <ModuleDefinitionFile>../libwdi.def</ModuleDefinitionFile>
+      <EmbedManagedResourceFile>../libwdi.rc;%(EmbedManagedResourceFile)</EmbedManagedResourceFile>
+    </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <PreBuildEvent>
       <Message>Embedding binary resources</Message>
       <Command>cd $(ProjectDir)\..
-if exist embedded.no_is ren embedded.no_is embedded.h
 embedder embedded.h</Command>
     </PreBuildEvent>
     <ClCompile>
       <Optimization>MinSpace</Optimization>
       <AdditionalIncludeDirectories>..\..\msvc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_WIN32;_LIB;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>_WIN32;_LIB;_CRT_SECURE_NO_WARNINGS;DLL_EXPORT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <WarningLevel>Level3</WarningLevel>
+      <ExceptionHandling>false</ExceptionHandling>
+      <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>E:\WinDDK\7600.16385.0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
-    <Lib>
-      <OutputFile>$(OutDir)libwdi.lib</OutputFile>
-    </Lib>
-    <PostBuildEvent>
-      <Command>cd $(ProjectDir)\..
-ren embedded.h embedded.no_is</Command>
-    </PostBuildEvent>
-    <PostBuildEvent>
-      <Message>rename embedded.h, to avoid Intellisense hogging CPU time parsing it</Message>
-    </PostBuildEvent>
+    <Link>
+      <AdditionalDependencies>setupapi.lib;newdev.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <OutputFile>$(OutDir)libwdi.dll</OutputFile>
+      <ModuleDefinitionFile>../libwdi.def</ModuleDefinitionFile>
+      <EmbedManagedResourceFile>../libwdi.rc;%(EmbedManagedResourceFile)</EmbedManagedResourceFile>
+    </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <PreBuildEvent>
       <Message>Embedding binary resources</Message>
       <Command>cd $(ProjectDir)\..
-if exist embedded.no_is ren embedded.no_is embedded.h
 embedder embedded.h</Command>
     </PreBuildEvent>
     <ClCompile>
       <Optimization>MinSpace</Optimization>
       <AdditionalIncludeDirectories>..\..\msvc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_WIN32;_WIN64;_LIB;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>_WIN32;_WIN64;_LIB;_CRT_SECURE_NO_WARNINGS;DLL_EXPORT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <WarningLevel>Level3</WarningLevel>
+      <ExceptionHandling>false</ExceptionHandling>
+      <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>E:\WinDDK\7600.16385.0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
-    <Lib>
-      <OutputFile>$(OutDir)libwdi.lib</OutputFile>
-    </Lib>
-    <PostBuildEvent>
-      <Command>cd $(ProjectDir)\..
-ren embedded.h embedded.no_is</Command>
-    </PostBuildEvent>
-    <PostBuildEvent>
-      <Message>rename embedded.h, to avoid Intellisense hogging CPU time parsing it</Message>
-    </PostBuildEvent>
+    <Link>
+      <AdditionalDependencies>setupapi.lib;newdev.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <OutputFile>$(OutDir)libwdi.dll</OutputFile>
+      <ModuleDefinitionFile>../libwdi.def</ModuleDefinitionFile>
+      <EmbedManagedResourceFile>../libwdi.rc;%(EmbedManagedResourceFile)</EmbedManagedResourceFile>
+    </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\libwdi.c" />
@@ -206,23 +197,24 @@ ren embedded.h embedded.no_is</Command>
     <ClInclude Include="..\tokenizer.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\libusb0.cat.in" />
     <None Include="..\libusb0.inf.in" />
-    <None Include="..\libusbk.cat.in" />
-    <None Include="..\winusb.cat.in" />
+    <None Include="..\libwdi.def" />
     <None Include="..\winusb.inf.in" />
     <None Include="..\libusbk.inf.in" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="embedder_2010.vcxproj">
+    <ResourceCompile Include="..\libwdi.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="embedder.vcxproj">
       <Project>{792d44d5-28a7-4eb3-b84b-8021fe3189f9}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
-    <ProjectReference Include="installer_x64_2010.vcxproj">
+    <ProjectReference Include="installer_x64.vcxproj">
       <Project>{e5a56ee0-182f-470f-8cdc-8c1b7b86ee26}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
-    <ProjectReference Include="installer_x86_2010.vcxproj">
+    <ProjectReference Include="installer_x86.vcxproj">
       <Project>{9b1c561e-f95b-4849-a7aa-a4350e227c20}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>

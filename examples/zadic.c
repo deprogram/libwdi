@@ -1,7 +1,7 @@
 
 /*
 * Zadic: Automated Driver Installer for USB devices (Console version)
-* Copyright (c) 2010 Pete Batard <pbatard@gmail.com>
+* Copyright (c) 2010-2014 Pete Batard <pete@akeo.ie>
 * Copyright (c) 2010 Joseph Marshall <jmarshall@gcdataconcepts.com>
 *
 * This library is free software; you can redistribute it and/or
@@ -36,9 +36,8 @@
 #endif
 #include "libwdi.h"
 
-#define FLUSHER	while(getchar() != 0x0A)
+#define FLUSHER while(getchar() != 0x0A)
 #define INF_NAME "libusb_device.inf"
-#define DEFAULT_DIR "C:\\usb_driver"
 
 struct wdi_options_prepare_driver pd_options = { 0 };
 struct wdi_options_install_driver id_options = { 0 };
@@ -60,7 +59,7 @@ int __cdecl main(int argc, char *argv[])
 {
 	int c;
 	struct wdi_device_info *device, *list;
-	char* path = DEFAULT_DIR;
+	char* path = "usb_driver";
 	static struct wdi_options_create_list cl_options = { 0 };
 	static int prompt_flag = 1;
 	static unsigned char iface = 0;
@@ -73,7 +72,7 @@ int __cdecl main(int argc, char *argv[])
 	int devNum = 0;
 	bool driverinstalled = false;
 
-	cl_options.trim_whitespaces = true;
+	cl_options.trim_whitespaces = TRUE;
 
 	// Parse command-line options
 	while(1)

@@ -1,6 +1,6 @@
 /*
  * libwdi: Library for automated Windows Driver Installation - PKI part
- * Copyright (c) 2011 Pete Batard <pbatard@gmail.com>
+ * Copyright (c) 2011-2013 Pete Batard <pete@akeo.ie>
  * For more info, please visit http://libwdi.akeo.ie
  *
  * This library is free software; you can redistribute it and/or
@@ -20,6 +20,12 @@
 
 // Undefine the following to run the program as standalone
 //#define CATSIGN_STANDALONE
+
+/* Memory leaks detection - define _CRTDBG_MAP_ALLOC as preprocessor macro */
+#ifdef _CRTDBG_MAP_ALLOC
+#include <stdlib.h>
+#include <crtdbg.h>
+#endif
 
 #include <windows.h>
 #include <setupapi.h>
@@ -562,7 +568,7 @@ BOOL AddCertToTrustedPublisher(BYTE* pbCertData, DWORD dwCertSize, BOOL bDisable
 			org[0] = 0; org_unit[0] = 0;
 			pfCertGetNameStringA(pCertContext, CERT_NAME_ATTR_TYPE, 0, szOID_ORGANIZATION_NAME, org, sizeof(org));
 			pfCertGetNameStringA(pCertContext, CERT_NAME_ATTR_TYPE, 0, szOID_ORGANIZATIONAL_UNIT_NAME, org_unit, sizeof(org_unit));
-			_snprintf(msg_string, sizeof(msg_string), "Warning: this software is about to install the following organization\n"
+			safe_sprintf(msg_string, sizeof(msg_string), "Warning: this software is about to install the following organization\n"
 				"as a Trusted Publisher on your system:\n\n '%s%s%s%s'\n\n"
 				"This will allow this Publisher to run software with elevated privileges,\n"
 				"as well as install driver packages, without further security notices.\n\n"
@@ -1191,7 +1197,7 @@ static void ScanDirAndHash(HANDLE hCat, LPCSTR szDirName, LPSTR* szFileList, DWO
  * Create a cat file for driver package signing, and add any listed matching file found in the
  * szSearchDir directory
  */
-BOOL CreateCat(LPCSTR szCatPath, LPCSTR szHWID, LPCSTR szSearchDir, LPSTR* szFileList, DWORD cFileList)
+BOOL CreateCat(LPCSTR szCatPath, LPCSTR szHWID, LPCSTR szSearchDir, LPCSTR* szFileList, DWORD cFileList)
 {
 	PF_DECL(CryptCATOpen);
 	PF_DECL(CryptCATClose);
@@ -1206,6 +1212,7 @@ BOOL CreateCat(LPCSTR szCatPath, LPCSTR szHWID, LPCSTR szSearchDir, LPSTR* szFil
 	LPWSTR wszCatPath = NULL;
 	LPWSTR wszHWID = NULL;
 	LPCWSTR wszOS = L"XPX86,XPX64,VistaX86,VistaX64,7X86,7X64";
+	LPSTR * szLocalFileList;
 
 	PF_INIT_OR_OUT(CryptCATOpen, wintrust);
 	PF_INIT_OR_OUT(CryptCATClose, wintrust);
@@ -1243,9 +1250,23 @@ BOOL CreateCat(LPCSTR szCatPath, LPCSTR szHWID, LPCSTR szSearchDir, LPSTR* szFil
 		goto out;
 	}
 	// Make sure the list entries are all lowercase
-	for (i=0; i<cFileList; i++) _strlwr(szFileList[i]);
-	ScanDirAndHash(hCat, "", szFileList, cFileList);
-
+	szLocalFileList = (LPSTR *)malloc(cFileList*sizeof(LPSTR));
+	if (szLocalFileList == NULL) {
+		wdi_warn("unable allocate local file list");
+		goto out;
+	}
+	for (i=0; i<cFileList; i++){
+		szLocalFileList[i] = _strdup(szFileList[i]);
+		if (szLocalFileList[i] == NULL)
+			wdi_warn("'%s' could not be duplicated and will be ignored", szFileList[i]);
+		else
+			_strlwr(szLocalFileList[i]);
+	}
+	ScanDirAndHash(hCat, "", szLocalFileList, cFileList);
+	for (i=0; i<cFileList; i++){
+		free(szLocalFileList[i]);
+	}
+	free(szLocalFileList);
 	// The cat needs to be sorted before being saved
 	if (!pfCryptCATPersistStore(hCat)) {
 		wdi_warn("unable to sort file: %s",  windows_error_str(0));

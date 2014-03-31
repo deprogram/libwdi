@@ -1,6 +1,6 @@
 /*
  * Library for USB automated driver installation
- * Copyright (c) 2010-2011 Pete Batard <pbatard@gmail.com>
+ * Copyright (c) 2010-2014 Pete Batard <pete@akeo.ie>
  * Parts of the code from libusb by Daniel Drake, Johannes Erdfelt et al.
  * For more info, please visit http://libwdi.akeo.ie
  *
@@ -18,6 +18,13 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
+
+/* Memory leaks detection - define _CRTDBG_MAP_ALLOC as preprocessor macro */
+#ifdef _CRTDBG_MAP_ALLOC
+#include <stdlib.h>
+#include <crtdbg.h>
+#endif
+
 #include <windows.h>
 #include <setupapi.h>
 #include <io.h>
@@ -71,15 +78,15 @@ extern int run_with_progress_bar(HWND hWnd, int(*function)(void*), void* arglist
 // These ones are defined in pki
 extern BOOL AddCertToTrustedPublisher(BYTE* cert_data, DWORD cert_size, BOOL disable_warning, HWND hWnd);
 extern BOOL SelfSignFile(LPCSTR szFileName, LPCSTR szCertSubject);
-extern BOOL CreateCat(LPCSTR szCatPath, LPCSTR szHWID, LPCSTR szSearchDir, LPSTR* szFileList, DWORD cFileList);
+extern BOOL CreateCat(LPCSTR szCatPath, LPCSTR szHWID, LPCSTR szSearchDir, LPCSTR* szFileList, DWORD cFileList);
 
 /*
  * Structure used for the threaded call to install_driver_internal()
  */
 struct install_driver_params {
 	struct wdi_device_info* device_info;
-	char* path;
-	char* inf_name;
+	const char* path;
+	const char* inf_name;
 	struct wdi_options_install_driver* options;
 };
 
@@ -128,11 +135,102 @@ token_entity_t inf_entities[]=
 };
 
 /*
+ * List of Android devices that need to be assigned a specific Device Interface GUID
+ * so that they are recognized with Google's debug tools.
+ * This list gets updated from https://github.com/gu1dry/android_winusb/ (Cyanogenmod)
+ * and http://developer.android.com/sdk/win-usb.html (Google USB driver)
+ * NB: We don't specify an MI, as the assumption is that the MTP driver has already been
+ * installed automatically, which will only leave the driverless debug interface to pick
+ * a driver for.
+ */
+const char* android_device_guid = "{f72fe0d4-cbcb-407d-8814-9ed673d0dd6b}";
+const struct {uint16_t vid; uint16_t pid;} android_device[] = {
+	{0x0451, 0xD022},
+	{0x0451, 0xD101},
+	{0x0489, 0xC001},
+	{0x04E8, 0x685D},
+	{0x04E8, 0x685E},
+	{0x04E8, 0x6860},
+	{0x05C6, 0x9025},
+	{0x0955, 0x7100},
+	{0x0B05, 0x4D01},
+	{0x0B05, 0x4D03},
+	{0x0B05, 0x4E01},
+	{0x0B05, 0x4E03},
+	{0x0B05, 0x4E1F},
+	{0x0B05, 0x4E3F},
+	{0x0BB4, 0x0C01},
+	{0x0BB4, 0x0C02},
+	{0x0BB4, 0x0C03},
+	{0x0BB4, 0x0C87},
+	{0x0BB4, 0x0C8B},
+	{0x0BB4, 0x0C8D},
+	{0x0BB4, 0x0C91},
+	{0x0BB4, 0x0C92},
+	{0x0BB4, 0x0C96},
+	{0x0BB4, 0x0C97},
+	{0x0BB4, 0x0CA2},
+	{0x0BB4, 0x0CA4},
+	{0x0BB4, 0x0CA5},
+	{0x0BB4, 0x0CAC},
+	{0x0BB4, 0x0CAD},
+	{0x0BB4, 0x0CBA},
+	{0x0BB4, 0x0CED},
+	{0x0BB4, 0x0E03},
+	{0x0BB4, 0x0FF9},
+	{0x0BB4, 0x0FFF},
+	{0x0FCE, 0x0DDE},
+	{0x0FCE, 0x4E30},
+	{0x0FCE, 0x6860},
+	{0x0FCE, 0xD001},
+	{0x1004, 0x618E},
+	{0x12D1, 0x1501},
+	{0x18D1, 0x0D02},
+	{0x18D1, 0x0D02},
+	{0x18D1, 0x2C10},
+	{0x18D1, 0x2C11},
+	{0x18D1, 0x4E11},
+	{0x18D1, 0x4E12},
+	{0x18D1, 0x4E21},
+	{0x18D1, 0x4E22},
+	{0x18D1, 0x4E23},
+	{0x18D1, 0x4E24},
+	{0x18D1, 0x4E30},
+	{0x18D1, 0x4E40},
+	{0x18D1, 0x4E41},
+	{0x18D1, 0x4E42},
+	{0x18D1, 0x4E44},
+	{0x18D1, 0x4EE0},
+	{0x18D1, 0x4EE1},
+	{0x18D1, 0x4EE2},
+	{0x18D1, 0x4EE3},
+	{0x18D1, 0x4EE4},
+	{0x18D1, 0x4EE4},
+	{0x18D1, 0x4EE5},
+	{0x18D1, 0x4EE6},
+	{0x18D1, 0x708C},
+	{0x18D1, 0x708C},
+	{0x18D1, 0x9001},
+	{0x18D1, 0x9001},
+	{0x18D1, 0xD002},
+	{0x19D2, 0x1351},
+	{0x19D2, 0x1354},
+	{0x2080, 0x0002},
+	{0x22B8, 0x2D66},
+	{0x22B8, 0x41DB},
+	{0x22B8, 0x4286},
+	{0x22B8, 0x42A4},
+	{0x22B8, 0x42DA},
+	{0x22B8, 0x4331},
+	{0x22B8, 0x70A9},
+};
+
+/*
  * Global variables
  */
 static struct wdi_device_info *current_device = NULL;
-static bool dlls_available = false;
-static bool filter_driver = false;
+static BOOL dlls_available = FALSE;
+static BOOL filter_driver = FALSE;
 static DWORD timeout = DEFAULT_TIMEOUT;
 static HANDLE pipe_handle = INVALID_HANDLE_VALUE;
 static VS_FIXEDFILEINFO driver_version[WDI_NB_DRIVERS-1] = { {0}, {0}, {0} };
@@ -142,7 +240,7 @@ static const char* cat_template[WDI_NB_DRIVERS-1] = {"winusb.cat.in", "libusb0.c
 static const char* ms_compat_id[WDI_NB_DRIVERS-1] = {"MS_COMP_WINUSB", "MS_COMP_LIBUSB0", "MS_COMP_LIBUSBK"};
 // for 64 bit platforms detection
 static BOOL (__stdcall *pIsWow64Process)(HANDLE, PBOOL) = NULL;
-static enum windows_version windows_version = WINDOWS_UNDEFINED;
+static int windows_version = WINDOWS_UNDEFINED;
 
 /*
  * For the retrieval of the device description on Windows 7
@@ -213,34 +311,62 @@ static int64_t __inline unixtime_to_msfiletime(time_t t)
 }
 
 // Detect Windows version
-#define GET_WINDOWS_VERSION do{ if (windows_version == WINDOWS_UNDEFINED) detect_version(); } while(0)
-static void detect_version(void)
+#define GET_WINDOWS_VERSION do{ if (windows_version == WINDOWS_UNDEFINED) windows_version = detect_version(); } while(0)
+static int detect_version(void)
 {
-	OSVERSIONINFO os_version;
+	OSVERSIONINFOEXA vi, vi2;
+	unsigned major, minor;
+	ULONGLONG major_equal, minor_equal;
+	int nWindowsVersion;
 
-	memset(&os_version, 0, sizeof(OSVERSIONINFO));
-	os_version.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
-	windows_version = WINDOWS_UNSUPPORTED;
-	if ((GetVersionEx(&os_version) != 0) && (os_version.dwPlatformId == VER_PLATFORM_WIN32_NT)) {
-		if ((os_version.dwMajorVersion == 5) && (os_version.dwMinorVersion == 0)) {
-			windows_version = WINDOWS_2K;
-			wdi_info("Windows 2000");
-		} else if ((os_version.dwMajorVersion == 5) && (os_version.dwMinorVersion == 1)) {
-			windows_version = WINDOWS_XP;
-			wdi_info("Windows XP");
-		} else if ((os_version.dwMajorVersion == 5) && (os_version.dwMinorVersion == 2)) {
-			windows_version = WINDOWS_2003_XP64;
-			wdi_info("Windows 2003 or Windows XP 64 bit");
-		} else if (os_version.dwMajorVersion >= 6) {
-			if (os_version.dwBuildNumber < 7000) {
-				windows_version = WINDOWS_VISTA;
-				wdi_info("Windows Vista");
-			} else {
-				windows_version = WINDOWS_7;
-				wdi_info("Windows 7");
+	nWindowsVersion = WINDOWS_UNDEFINED;
+
+	memset(&vi, 0, sizeof(vi));
+	vi.dwOSVersionInfoSize = sizeof(vi);
+	if (!GetVersionExA((OSVERSIONINFOA *)&vi)) {
+		memset(&vi, 0, sizeof(vi));
+		vi.dwOSVersionInfoSize = sizeof(OSVERSIONINFOA);
+		if (!GetVersionExA((OSVERSIONINFOA *)&vi))
+			return nWindowsVersion;
+	}
+
+	if (vi.dwPlatformId == VER_PLATFORM_WIN32_NT) {
+
+		if (vi.dwMajorVersion > 6 || (vi.dwMajorVersion == 6 && vi.dwMinorVersion >= 2)) {
+			// Starting with Windows 8.1 Preview, GetVersionEx() does no longer report the actual OS version
+			// See: http://msdn.microsoft.com/en-us/library/windows/desktop/dn302074.aspx
+
+			major_equal = VerSetConditionMask(0, VER_MAJORVERSION, VER_EQUAL);
+			for (major = vi.dwMajorVersion; major <= 9; major++) {
+				memset(&vi2, 0, sizeof(vi2));
+				vi2.dwOSVersionInfoSize = sizeof(vi2); vi2.dwMajorVersion = major;
+				if (!VerifyVersionInfoA(&vi2, VER_MAJORVERSION, major_equal))
+					continue;
+				if (vi.dwMajorVersion < major) {
+					vi.dwMajorVersion = major; vi.dwMinorVersion = 0;
+				}
+
+				minor_equal = VerSetConditionMask(0, VER_MINORVERSION, VER_EQUAL);
+				for (minor = vi.dwMinorVersion; minor <= 9; minor++) {
+					memset(&vi2, 0, sizeof(vi2)); vi2.dwOSVersionInfoSize = sizeof(vi2);
+					vi2.dwMinorVersion = minor;
+					if (!VerifyVersionInfoA(&vi2, VER_MINORVERSION, minor_equal))
+						continue;
+					vi.dwMinorVersion = minor;
+					break;
+				}
+
+				break;
 			}
 		}
+
+		if (vi.dwMajorVersion <= 0xf && vi.dwMinorVersion <= 0xf) {
+			nWindowsVersion = vi.dwMajorVersion << 4 | vi.dwMinorVersion;
+			if (nWindowsVersion < 0x51)
+				nWindowsVersion = WINDOWS_UNSUPPORTED;;
+		}
 	}
+	return nWindowsVersion;
 }
 
 /*
@@ -331,9 +457,9 @@ static PSID get_sid(void) {
 
 /*
  * Check whether the path is a directory with write access
- * if create is true, create directory if it doesn't exist
+ * if create is TRUE, create directory if it doesn't exist
  */
-static int check_dir(char* path, bool create)
+static int check_dir(const char* path, BOOL create)
 {
 	int r;
 	DWORD file_attributes;
@@ -529,7 +655,7 @@ int get_version_info(int driver_type, VS_FIXEDFILEINFO* driver_info)
 		wdi_warn("unable to use TEMP to extract file");
 		return WDI_ERROR_RESOURCE;
 	}
-	r = check_dir(tmpdir, true);
+	r = check_dir(tmpdir, TRUE);
 	if (r != WDI_SUCCESS) {
 		return r;
 	}
@@ -575,7 +701,7 @@ int get_version_info(int driver_type, VS_FIXEDFILEINFO* driver_info)
 /*
  * Find out if the driver selected is actually embedded in this version of the library
  */
-bool LIBWDI_API wdi_is_driver_supported(int driver_type, VS_FIXEDFILEINFO* driver_info)
+BOOL LIBWDI_API wdi_is_driver_supported(int driver_type, VS_FIXEDFILEINFO* driver_info)
 {
 	if (driver_info != NULL) {
 		memset(driver_info, 0, sizeof(VS_FIXEDFILEINFO));
@@ -587,35 +713,35 @@ bool LIBWDI_API wdi_is_driver_supported(int driver_type, VS_FIXEDFILEINFO* drive
 #if defined(DDK_DIR)
 		// WinUSB is not supported on Win2k/2k3
 		GET_WINDOWS_VERSION;
-		if ( (windows_version == WINDOWS_2K)
-		  || (windows_version == WINDOWS_2003_XP64) ) {
-			return false;
+		if ( (windows_version < WINDOWS_XP)
+		  || (windows_version == WINDOWS_2003) ) {
+			return FALSE;
 		}
-		return true;
+		return TRUE;
 #else
-		return false;
+		return FALSE;
 #endif
 	case WDI_LIBUSB0:
 #if defined(LIBUSB0_DIR)
-		return true;
+		return TRUE;
 #else
-		return false;
+		return FALSE;
 #endif
 	case WDI_LIBUSBK:
 #if defined(LIBUSBK_DIR)
-		return true;
+		return TRUE;
 #else
-		return false;
+		return FALSE;
 #endif
 	case WDI_USER:
 #if defined(USER_DIR)
-		return true;
+		return TRUE;
 #else
-		return false;
+		return FALSE;
 #endif
 	default:
 		wdi_err("unknown driver type");
-		return false;
+		return FALSE;
 	}
 }
 
@@ -624,21 +750,21 @@ bool LIBWDI_API wdi_is_driver_supported(int driver_type, VS_FIXEDFILEINFO* drive
  * Find out if a file is embedded in the current libwdi resources
  * path is the relative path for
  */
-bool LIBWDI_API wdi_is_file_embedded(char* path, char* name)
+BOOL LIBWDI_API wdi_is_file_embedded(const char* path, const char* name)
 {
 	int i;
 
 	for (i=0; i<nb_resources; i++) {
 		if (safe_strcmp(name, resource[i].name) == 0) {
 			if (path == NULL) {
-				return true;
+				return TRUE;
 			}
 			if (safe_strcmp(path, resource[i].subdir) == 0) {
-				return true;
+				return TRUE;
 			}
 		}
 	}
-	return false;
+	return FALSE;
 }
 
 
@@ -759,9 +885,11 @@ int LIBWDI_API wdi_create_list(struct wdi_device_info** list,
 	char strbuf[STR_BUFFER_SIZE], drv_version[] = "xxxxx.xxxxx.xxxxx.xxxxx";
 	wchar_t desc[MAX_DESC_LENGTH];
 	struct wdi_device_info *start = NULL, *cur = NULL, *device_info = NULL;
-	const char* usbhub_name[] = {"usbhub", "usbhub3", "nusb3hub", "rusb3hub", "flxhcih", "tihub3", "etronhub3", "viahub3", "asmthub3", "iusb3hub"};
+	// NOTE: Don't forget to update the list of hubs in zadig.c (system_name[]) when adding new entries below
+	const char* usbhub_name[] = { "usbhub", "usbhub3", "usb3hub", "nusb3hub", "rusb3hub", "flxhcih", "tihub3",
+		"etronhub3", "viahub3", "asmthub3", "iusb3hub", "vusb3hub", "amdhub30" };
 	const char usbccgp_name[] = "usbccgp";
-	bool is_hub, is_composite_parent, has_vid;
+	BOOL is_hub, is_composite_parent, has_vid;
 
 	MUTEX_START;
 	*list = NULL;
@@ -819,24 +947,24 @@ int LIBWDI_API wdi_create_list(struct wdi_device_info** list,
 		} else {
 			device_info->driver = safe_strdup(strbuf);
 		}
-		is_hub = false;
+		is_hub = FALSE;
 		for (j=0; j<ARRAYSIZE(usbhub_name); j++) {
 			if (safe_stricmp(strbuf, usbhub_name[j]) == 0) {
-				is_hub = true;
+				is_hub = TRUE;
 				break;
 			}
 		}
-		if (is_hub && (!options->list_hubs)) {
+		if (is_hub && ((options == NULL) || (!options->list_hubs))) {
 			continue;
 		}
 		// Also eliminate composite devices parent drivers, as replacing these drivers
 		// is a bad idea
-		is_composite_parent = false;
+		is_composite_parent = FALSE;
 		if (safe_stricmp(strbuf, usbccgp_name) == 0) {
-			if (!options->list_hubs) {
+			if ((options == NULL) || (!options->list_hubs)) {
 				continue;
 			}
-			is_composite_parent = true;
+			is_composite_parent = TRUE;
 		}
 
 		// Retrieve the first hardware ID
@@ -850,7 +978,7 @@ int LIBWDI_API wdi_create_list(struct wdi_device_info** list,
 		// We assume that the first one (REG_MULTI_SZ) is the one we are interested in
 		device_info->hardware_id = safe_strdup(strbuf);
 
-		// Retreive the first Compatible ID
+		// Retrieve the first Compatible ID
 		if (SetupDiGetDeviceRegistryPropertyA(dev_info, &dev_info_data, SPDRP_COMPATIBLEIDS,
 			&reg_type, (BYTE*)strbuf, STR_BUFFER_SIZE, &size)) {
 			wdi_dbg("Compatible ID: %s", strbuf);
@@ -926,10 +1054,10 @@ int LIBWDI_API wdi_create_list(struct wdi_device_info** list,
 			}
 		}
 
-		device_info->is_composite = false;	// non composite by default
+		device_info->is_composite = FALSE;	// non composite by default
 		device_info->mi = 0;
 		token = strtok (strbuf, "\\#&");
-		has_vid = false;
+		has_vid = FALSE;
 		while(token != NULL) {
 			for (j = 0; j < 3; j++) {
 				if (safe_strncmp(token, prefix[j], safe_strlen(prefix[j])) == 0) {
@@ -940,7 +1068,7 @@ int LIBWDI_API wdi_create_list(struct wdi_device_info** list,
 						} else {
 							device_info->vid = (unsigned short)tmp;
 						}
-						has_vid = true;
+						has_vid = TRUE;
 						break;
 					case 1:
 						if (sscanf(token, "PID_%04X", &tmp) != 1) {
@@ -953,7 +1081,7 @@ int LIBWDI_API wdi_create_list(struct wdi_device_info** list,
 						if (sscanf(token, "MI_%02X", &tmp) != 1) {
 							wdi_err("could not convert MI string");
 						} else {
-							device_info->is_composite = true;
+							device_info->is_composite = TRUE;
 							device_info->mi = (unsigned char)tmp;
 							if ((wcslen(desc) + sizeof(" (Interface ###)")) < MAX_DESC_LENGTH) {
 								_snwprintf(&desc[wcslen(desc)], sizeof(" (Interface ###)"),
@@ -1027,7 +1155,7 @@ int LIBWDI_API wdi_destroy_list(struct wdi_device_info* list)
 }
 
 // extract the embedded binary resources
-static int extract_binaries(char* path)
+static int extract_binaries(const char* path)
 {
 	FILE *fd;
 	char filename[MAX_PATH];
@@ -1042,7 +1170,7 @@ static int extract_binaries(char* path)
 		safe_strcat(filename, MAX_PATH, "\\");
 		safe_strcat(filename, MAX_PATH, resource[i].subdir);
 
-		r = check_dir(filename, true);
+		r = check_dir(filename, TRUE);
 		if (r != WDI_SUCCESS) {
 			return r;
 		}
@@ -1089,19 +1217,22 @@ static long tokenize_internal(const char* resource_name, char** dst, const token
 
 #define CAT_LIST_MAX_ENTRIES 16
 // Create an inf and extract coinstallers in the directory pointed by path
-int LIBWDI_API wdi_prepare_driver(struct wdi_device_info* device_info, char* path,
-								  char* inf_name, struct wdi_options_prepare_driver* options)
+int LIBWDI_API wdi_prepare_driver(struct wdi_device_info* device_info, const char* path,
+								  const char* inf_name, struct wdi_options_prepare_driver* options)
 {
 	const wchar_t bom = 0xFEFF;
+#if defined(ENABLE_DEBUG_LOGGING) || defined(INCLUDE_DEBUG_LOGGING)
 	const char* driver_display_name[WDI_NB_DRIVERS] = { "WinUSB", "libusb0.sys", "libusbK.sys", "user driver" };
+#endif
 	const char* inf_ext = ".inf";
 	const char* vendor_name = NULL;
-	char* cat_list[CAT_LIST_MAX_ENTRIES+1];
+	const char* cat_list[CAT_LIST_MAX_ENTRIES+1];
 	char inf_path[MAX_PATH], cat_path[MAX_PATH], hw_id[40], cert_subject[64];
 	char *strguid, *token, *cat_name = NULL, *dst = NULL, *cat_in_copy = NULL;
 	wchar_t *wdst = NULL;
-	int nb_entries, driver_type = WDI_WINUSB, r = WDI_ERROR_OTHER;
+	int i, nb_entries, driver_type = WDI_WINUSB, r = WDI_ERROR_OTHER;
 	long inf_file_size, cat_file_size;
+	BOOL is_android_device = FALSE;
 	FILE* fd;
 	GUID guid;
 	SYSTEMTIME system_time;
@@ -1136,7 +1267,7 @@ int LIBWDI_API wdi_prepare_driver(struct wdi_device_info* device_info, char* pat
 	}
 
 	// Try to create directory if it doesn't exist
-	r = check_dir(path, true);
+	r = check_dir(path, TRUE);
 	if (r != WDI_SUCCESS) {
 		MUTEX_RETURN r;
 	}
@@ -1231,13 +1362,24 @@ int LIBWDI_API wdi_prepare_driver(struct wdi_device_info* device_info, char* pat
 		static_strcpy(inf_entities[USE_DEVICE_INTERFACE_GUID].replace, "AddDeviceInterfaceGUID");
 	}
 
+	// Find out if we have an Android device
+	for (i=0; i<ARRAYSIZE(android_device); i++) {
+		if ((android_device[i].vid == device_info->vid) && (android_device[i].pid == device_info->pid)) {
+			is_android_device = TRUE;
+			break;
+		}
+	}
+
 	// Populate the Device Interface GUID
 	if ((options != NULL) && (options->use_wcid_driver)) {
 		strguid = "UNUSED";
 	} else if ((options != NULL) && (options->device_guid != NULL)) {
 		strguid = options->device_guid;
+	} else if (is_android_device) {
+		wdi_info("using Android Device Interface GUID");
+		strguid = (char*)android_device_guid;
 	} else {
-		CoCreateGuid(&guid);
+		IGNORE_RETVAL(CoCreateGuid(&guid));
 		strguid = guid_to_string(guid);
 	}
 	static_sprintf(inf_entities[DEVICE_INTERFACE_GUID].replace, "%s", strguid);
@@ -1302,7 +1444,7 @@ int LIBWDI_API wdi_prepare_driver(struct wdi_device_info* device_info, char* pat
 		wdi_err("could not tokenize inf file (%d)", inf_file_size);
 		MUTEX_RETURN WDI_ERROR_ACCESS;
 	}
-	wdi_info("succesfully created '%s'", inf_path);
+	wdi_info("successfully created '%s'", inf_path);
 
 	GET_WINDOWS_VERSION;
 	INIT_VISTA_SHELL32;
@@ -1353,6 +1495,7 @@ int LIBWDI_API wdi_prepare_driver(struct wdi_device_info* device_info, char* pat
 			wdi_warn("could not sign cat file");
 		}
 		safe_free(cat_in_copy);
+		safe_free(dst);
 	} else {
 		wdi_info("No .cat file generated (not running Vista or later, or missing elevated privileges)");
 	}
@@ -1466,7 +1609,7 @@ static int install_driver_internal(void* arglist)
 	OVERLAPPED overlapped;
 	int r;
 	DWORD err, rd_count, to_read, offset, bufsize = LOGBUF_SIZE;
-	BOOL is_x64 = false;
+	BOOL is_x64 = FALSE;
 	char *buffer = NULL, *new_buffer;
 	const char* filter_name = "libusb0";
 
@@ -1477,7 +1620,9 @@ static int install_driver_internal(void* arglist)
 	}
 
 	current_device = params->device_info;
-	filter_driver = params->options->install_filter_driver;
+	filter_driver = FALSE;
+	if (params->options != NULL)
+		filter_driver = params->options->install_filter_driver;
 
 	// Try to use the user's temp dir if no path is provided
 	if ((params->path == NULL) || (params->path[0] == 0)) {
@@ -1493,7 +1638,7 @@ static int install_driver_internal(void* arglist)
 	}
 
 	// Detect if another installation is in process
-	if (CMP_WaitNoPendingInstallEvents != NULL) {
+	if ((params->options != NULL) && (CMP_WaitNoPendingInstallEvents != NULL)) {
 		if (CMP_WaitNoPendingInstallEvents(params->options->pending_install_timeout) == WAIT_TIMEOUT) {
 			wdi_warn("timeout expired while waiting for another pending installation - aborting");
 			MUTEX_RETURN WDI_ERROR_PENDING_INSTALLATION;
@@ -1513,7 +1658,7 @@ static int install_driver_internal(void* arglist)
 			(*pIsWow64Process)(GetCurrentProcess(), &is_x64);
 		}
 	} else {
-		is_x64 = true;
+		is_x64 = TRUE;
 	}
 
 	// Use a pipe to communicate with our installer
@@ -1533,24 +1678,13 @@ static int install_driver_internal(void* arglist)
 	overlapped.hEvent = handle[0];
 
 	if (!filter_driver) {
-		safe_strcpy(exename, sizeof(exename), path);
 		// Why do we need two installers? Glad you asked. If you try to run the x86 installer on an x64
 		// system, you will get a "System does not work under WOW64 and requires 64-bit version" message.
-		if (is_x64) {
-			static_strcat(exename, "\\installer_x64.exe");
-		} else {
-			static_strcat(exename, "\\installer_x86.exe");
-		}
-		static_strcpy(exeargs, params->inf_name);
+		safe_sprintf(exename, sizeof(exename), "\"%s\\installer_x%s.exe\"", path, is_x64?"64":"86");
+		safe_sprintf(exeargs, sizeof(exeargs), "\"%s\"", params->inf_name);
 	} else {
 		// Use libusb-win32's filter driver installer
-		if (is_x64) {
-			static_strcat(path, "\\amd64");
-		} else {
-			static_strcat(path, "\\x86");
-		}
-		safe_strcpy(exename, sizeof(exename), path);
-		safe_strcat(exename, sizeof(exename), "\\install-filter.exe");
+		safe_sprintf(exename, sizeof(exename), "\"%s\\%s\\\\install-filter.exe\"", path, is_x64?"amd64":"x86");
 		if (safe_stricmp(current_device->upper_filter, filter_name) == 0) {
 			// Device already has the libusb-win32 filter => remove
 			static_strcpy(exeargs, "uninstall -d=");
@@ -1737,8 +1871,8 @@ out:
 	MUTEX_RETURN r;
 }
 
-int LIBWDI_API wdi_install_driver(struct wdi_device_info* device_info, char* path,
-								  char* inf_name, struct wdi_options_install_driver* options)
+int LIBWDI_API wdi_install_driver(struct wdi_device_info* device_info, const char* path,
+								  const char* inf_name, struct wdi_options_install_driver* options)
 {
 	struct install_driver_params params;
 	params.device_info = device_info;
@@ -1756,7 +1890,7 @@ int LIBWDI_API wdi_install_driver(struct wdi_device_info* device_info, char* pat
 
 // Install a driver signing certificate to the Trusted Publisher system store
 // This allows promptless installation if you also provide a signed inf/cat pair
-int LIBWDI_API wdi_install_trusted_certificate(char* cert_name,
+int LIBWDI_API wdi_install_trusted_certificate(const char* cert_name,
 											   struct wdi_options_install_cert* options)
 {
 	int i;
@@ -1796,4 +1930,14 @@ int LIBWDI_API wdi_install_trusted_certificate(char* cert_name,
 
 	wdi_err("this call must be run with elevated privileges on Vista and later");
 	return WDI_ERROR_NEEDS_ADMIN;
+}
+
+// Return the WDF version used by the native drivers
+int LIBWDI_API wdi_get_wdf_version(void)
+{
+#if defined(WDF_VER)
+	return WDF_VER;
+#else
+	return -1;
+#endif
 }
